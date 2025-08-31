@@ -1560,6 +1560,77 @@ public abstract class Doc {
         }
     }
 
+    // Emits comment text that does not participate in width accounting.
+    static final class CommentText extends Doc {
+        private final String text;
+
+        CommentText(String text) {
+            this.text = text;
+        }
+
+        String text() {
+            return text;
+        }
+
+        @Override
+        Doc flatten() {
+            return this;
+        }
+
+        @Override
+        boolean hasParams() {
+            return false;
+        }
+
+        @Override
+        boolean hasLineSeparators() {
+            return false;
+        }
+
+        @Override
+        public Doc bind(String name, Doc value) {
+            return null;
+        }
+
+        @Override
+        public Doc bind(Map<String, Doc> bindings) {
+            return null;
+        }
+
+    }
+
+    // Emits a newline for comments; resets column like a normal break
+// and triggers indent/margin injection, but does not influence “fits”.
+    static final class CommentNewline extends Doc {
+        CommentNewline() {
+        }
+
+        @Override
+        Doc flatten() {
+            return this;
+        }
+
+        @Override
+        boolean hasParams() {
+            return false;
+        }
+
+        @Override
+        boolean hasLineSeparators() {
+            return true;
+        }
+
+        @Override
+        public Doc bind(String name, Doc value) {
+            return null;
+        }
+
+        @Override
+        public Doc bind(Map<String, Doc> bindings) {
+            return null;
+        }
+    }
+
     /**
      * Represents a placeholder for a {@link Doc} that will be provided as a parameter.
      */
@@ -2174,6 +2245,14 @@ public abstract class Doc {
             // Eliminate WrapText
             WrapText wrapDoc = (WrapText) entryDoc;
             position = wrapText(options, inQueue, topEntry, wrapDoc, position);
+        } else if (entryDoc instanceof CommentNewline) {
+            // Output a newline for the comment
+            outQueue.add(topEntry);
+            // Reset column for width accounting
+            position = 0;
+        } else if (entryDoc instanceof CommentText) {
+            // Output the comment text as-is
+            outQueue.add(topEntry);
         } else if (entryDoc instanceof Text) {
             Text textDoc = (Text) entryDoc;
             // Keep track of line length
@@ -2236,6 +2315,10 @@ public abstract class Doc {
                 long resetAttrs = attrsStack.popLast();
                 long prevAttrs = attrsStack.peekLast();
                 Attrs.transition(output, resetAttrs, prevAttrs);
+            } else if (entryDoc instanceof CommentText) {
+                output.append(((CommentText) entryDoc).text());
+            } else if (entryDoc instanceof CommentNewline) {
+                output.append(System.lineSeparator());
             } else if (entryDoc instanceof Escape) {
                 Escape escapeDoc = (Escape) entryDoc;
                 long prevAttrs = attrsStack.peekLast();
@@ -2283,6 +2366,35 @@ public abstract class Doc {
      */
     public static void render(Doc doc, Appendable output) throws IOException {
         render(doc, RenderOptions.defaults(), output);
+    }
+
+    public static Doc commentInline(String text) {
+        if (text == null || text.isEmpty()) throw new IllegalArgumentException(""); //return empty();
+        text = text.substring(0, text.length() - 1);
+        if (text.indexOf('\n') >= 0) {
+            throw new IllegalArgumentException("commentInline() cannot contain newline, comment: " + text + " index: " + text.indexOf('\n'));
+        }
+        return new CommentText(text);
+    }
+
+    /**
+     * A line break inside a comment block (does not count toward width).
+     */
+    public static Doc commentBreak() {
+        return new CommentNewline();
+    }
+
+    /**
+     * Multi-line (block) comment from a list of lines; width-neutral.
+     */
+    public static Doc commentBlock(java.util.List<String> lines) {
+        if (lines == null || lines.isEmpty()) return empty();
+        Doc d = empty();
+        for (int i = 0; i < lines.size(); i++) {
+            if (i > 0) d = d.append(commentBreak());
+            d = d.append(commentInline(lines.get(i)));
+        }
+        return d;
     }
 
     /**
